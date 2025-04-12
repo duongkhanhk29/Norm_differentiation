@@ -1,21 +1,21 @@
 ## Description
 
-This repository contains the data and code used to replicate the results from the research on intergenerational mobility, based on the Global Database on Intergenerational Mobility (GDIM 2023). The core analysis code is provided in the **R Markdown** file **Mobility_GDIM_13_Mar.RMD**, which can be used to reproduce the results of the study.
+This repository contains the data and code used to replicate the results from the research on norm differentiation, based on the European Social Survey (Round 9). The core analysis code is provided in the **R Markdown** file **Fairness_sensitivity - final.RMD**, which can be used to reproduce the results of the study.
 
 The repository includes the following files:
 
-- **Mobility_GDIM_13_Mar.RMD**: Main R Markdown file for replication.
-- **Mobility_GDIM_13_Mar - sensitive.RMD**: Script for robustness checks, to be used for alternative specifications.
-- **GDIM_2023_03**: Original and processed data files for analysis.
-- **GDIM_Description_2023_03**: Data description.
+- **Fairness_sensitivity - final.RMD**: Main R Markdown file for replication.
+- **ESS9_subset.csv**: Original and processed data file for analysis (which has been subsetted for chosen variables).
+- **country.csv**: List of countries in the study
+- **external.xlsx**: Cultural Tightness-Looseness Index for external validity checks 
 
 The country names in the dataset are shortened for data visualization. For replication, ensure all data and code are in the same folder.
 
 ### Data and Code Availability Statement
 
-This package uses data derived from the Global Database on Intergenerational Mobility (GDIM 2023). For full details on the database, please cite the following source:
+This package uses data derived from the European Social Survey (Round 9). For full details on the database, please cite the following source:
 
-**van der Weide, Roy; Lakner, Christoph; Mahler, Daniel Gerszon; Narayan, Ambar; Ramasubbaiah, Rakesh. 2023. Intergenerational mobility around the world: A new database. Journal of Development Economics, Vol 166. [DOI](https://doi.org/10.1016/j.jdeveco.2023.103167)**
+**European Social Survey European Research Infrastructure (ESS ERIC) (2023) ESS9 - integrated file, edition 3.2 [Data set]. Sikt - Norwegian Agency for Shared Services in Education and Research. https://doi.org/10.21338/ess9e03_2.**
 
 To replicate the research, download the necessary data and place it in the same directory as the provided R Markdown scripts. Ensure all required R packages, as listed in the script, are installed.
 
@@ -24,7 +24,7 @@ To replicate the research, download the necessary data and place it in the same 
 - **Software**:
   - R (latest version recommended).
   - R Studio (for rendering the RMD files).
-  - All necessary packages are specified in the script **Mobility_GDIM_13_Mar.RMD**. Install them using the `install.packages()` function.
+  - All necessary packages are specified in the script **Fairness_sensitivity - final.RMD**. Install them using the `install.packages()` function.
 
 - **Hardware**:
   - Operating System: Any modern operating system (Windows, macOS, Linux).
@@ -42,9 +42,8 @@ To replicate the research, download the necessary data and place it in the same 
    - Ensure that the data file is unzipped and ready for use.
 
 2. **Analysis**:
-   - Open the **Mobility_GDIM_13_Mar.RMD** file in RStudio.
+   - Open the **Fairness_sensitivity - final.RMD** file in RStudio.
    - Follow the instructions within the script to load the data and execute the analysis.
-   - For robustness checks, use the **Mobility_GDIM_13_Mar - sensitive.RMD** file following the same steps.
 
 Both R Markdown files are designed to run without manual intervention, but ensure all necessary packages are installed before beginning the analysis.
 
