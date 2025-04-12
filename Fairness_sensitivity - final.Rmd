@@ -1,0 +1,458 @@
+---
+title: "Fairness Sensitivity"
+author: "Khanh Duong"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(0209)
+
+```
+
+```{r}
+df <- read.csv("ESS9_subset.csv")
+country <- read.csv("country.csv")
+df$cntry <- gsub("GB", "UK", df$cntry)
+
+library(dplyr)
+df <- left_join(df, country, by = c("cntry" = "code"))
+scale_to_01 <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+
+a <- 0.01
+b <- 0.01
+alpha <- 1
+beta <- 1
+it <- 40000
+
+```
+
+```{r}
+library(dplyr)
+
+# Define the groups
+recruit <- c("recskil", "recexp", "recknow", "recimg", "recgndr")
+fair <- c("sofrdst", "sofrwrk", "sofrpr", "sofrprv")
+
+# Summarize by country
+summary_df <- df %>%
+  group_by(cntry) %>%
+  summarise(
+    num_obs = n(),
+    perc_missing_recruit = sum(is.na(across(all_of(recruit)))) / (num_obs * length(recruit)) * 100,
+    perc_missing_fair = sum(is.na(across(all_of(fair)))) / (num_obs * length(fair)) * 100
+  )
+
+# View the summary
+head(summary_df)
+
+write.csv(summary_df, "tabs/summary.csv", row.names = TRUE)
+
+```
+
+
+
+# Fairness
+
+```{r}
+
+N <- length(fair) # Number of fair criteria
+M <- length(unique(df$cntry)) # Number of countries
+r <- N-1
+
+# Average distance matrix
+library(wCorr)
+country_data <- split(df, df$cntry)
+D <- lapply(country_data, function(country_df) {
+  corr_matrix <- sapply(fair, function(var1) {
+    sapply(fair, function(var2) {
+      valid_rows <- complete.cases(country_df[[var1]], country_df[[var2]], country_df$pspwght)
+      rho <- weightedCorr(country_df[[var1]][valid_rows], country_df[[var2]][valid_rows], 
+                          method = "Spearman", weights = country_df$pspwght[valid_rows])
+      distance <- 1 - rho
+      ifelse(abs(distance) < 1e-10, 0, distance)  # Force tiny values to 0
+    })
+  })
+  round(corr_matrix, 4)  # Round all to 4 decimals
+})
+
+D.avg <- Reduce("+", D) / length(D)
+Y <- cmdscale(D.avg,k = r) 
+v <- diag((1/(N-1))*(t(Y) - colMeans(Y))%*%t((t(Y) - colMeans(Y))))
+
+library(smacof)
+uni.fair <- uniscale(D.avg)$conf
+
+data.tn <- list(N = N, r = r, M = M, D = D, a = a, b = b, alpha = alpha, beta = beta, v = v)
+library(rstan)
+fit.fair <- stan(file = 'HMDS.stan', data = data.tn, 
+                   chains = 1, iter = it, verbose = FALSE, 
+                   control = list(max_treedepth = 10,
+                                  adapt_delta = 0.93))
+
+rstan::check_hmc_diagnostics(fit.fair)
+tau.fair <- as.data.frame(summary(fit.fair, pars = "tau")$summary)
+tau.fair$scaled <- scale_to_01(tau.fair[, 1])
+
+write.csv(tau.fair, "tabs/tau_fair.csv", row.names = TRUE)
+
+```
+
+```{r eval=FALSE, include=FALSE}
+fit_tau_sensitivity <- function(a, b, alpha, beta) {
+  fit <- stan(file = 'HMDS.stan', data = list(N = N, r = r, M = M, D = D, a = a, b = b, alpha = alpha, beta = beta, v = v),
+              chains = 1, iter = it, control = list(max_treedepth = 10, adapt_delta = 0.93))
+  return(fit)
+}
+
+priors_list <- list(
+  list(a = 0.01, b = 0.01, alpha = 1, beta = 1),
+  list(a = 0.01, b = 0.01, alpha = 2, beta = 5),
+  list(a = 0.01, b = 0.01, alpha = 3, beta = 10)
+)
+fits <- lapply(priors_list, function(p) fit_tau_sensitivity(p$a, p$b, p$alpha, p$beta))
+
+tau_comparison <- sapply(fits, function(fit) scale_to_01(summary(fit, pars = "tau")$summary[, "mean"]))
+
+sens <- data.frame(
+  tau = as.vector(tau_comparison),
+  prior = factor(rep(c("Weak", "Moderate", "Strong"), each = nrow(tau_comparison)))
+)
+
+library(ggplot2)
+sens.fair <- ggplot(sens, aes(x = tau, fill = prior)) +
+  geom_density(alpha = 0.5) + 
+  scale_fill_manual(values = c("green", "blue", "red"), labels = c("Weak", "Moderate", "Strong"))+
+  labs(title = "Social Fairness", x = NULL, y = "Density", fill = "Prior parameters") +
+  theme_minimal()
+
+sens.fair
+
+```
+
+
+# Recruit
+```{r}
+N <- length(recruit) # Number of recruit criteria
+M <- length(unique(df$cntry)) # Number of countries
+r <- N-1
+
+# Average distance matrix
+library(wCorr)
+country_data <- split(df, df$cntry)
+D <- lapply(country_data, function(country_df) {
+  corr_matrix <- sapply(recruit, function(var1) {
+    sapply(recruit, function(var2) {
+      valid_rows <- complete.cases(country_df[[var1]], country_df[[var2]], country_df$pspwght)
+      rho <- weightedCorr(country_df[[var1]][valid_rows], country_df[[var2]][valid_rows], 
+                          method = "Spearman", weights = country_df$pspwght[valid_rows])
+      distance <- 1 - rho
+      ifelse(abs(distance) < 1e-10, 0, distance)  # Force tiny values to 0
+    })
+  })
+  round(corr_matrix, 4)  # Round all to 4 decimals
+})
+
+D.avg <- Reduce("+", D) / length(D)
+Y <- cmdscale(D.avg,k = r) 
+v <- diag((1/(N-1))*(t(Y) - colMeans(Y))%*%t((t(Y) - colMeans(Y))))
+
+library(smacof)
+uni.recruit <- uniscale(D.avg)$conf
+
+data.tn <- list(N = N, r = r, M = M, D = D, a = a, b = b, alpha = alpha, beta = beta, v = v)
+library(rstan)
+fit.recruit <- stan(file = 'HMDS.stan', data = data.tn, 
+                   chains = 1, iter = it, verbose = FALSE, 
+                   control = list(max_treedepth = 10,
+                                  adapt_delta = 0.93))
+rstan::check_hmc_diagnostics(fit.recruit)
+tau.recruit <- as.data.frame(summary(fit.recruit, pars = "tau")$summary)
+tau.recruit$scaled <- scale_to_01(tau.recruit[, 1])
+
+write.csv(tau.recruit, "tabs/tau_recruit.csv", row.names = TRUE)
+
+```
+
+
+```{r eval=FALSE, include=FALSE}
+fit_tau_sensitivity <- function(a, b, alpha, beta) {
+  fit <- stan(file = 'HMDS.stan', data = list(N = N, r = r, M = M, D = D, a = a, b = b, alpha = alpha, beta = beta, v = v),
+              chains = 1, iter = it, control = list(max_treedepth = 10, adapt_delta = 0.93))
+  return(fit)
+}
+
+priors_list <- list(
+  list(a = 0.01, b = 0.01, alpha = 1, beta = 1),
+  list(a = 0.01, b = 0.01, alpha = 2, beta = 5),
+  list(a = 0.01, b = 0.01, alpha = 3, beta = 10)
+)
+fits <- lapply(priors_list, function(p) fit_tau_sensitivity(p$a, p$b, p$alpha, p$beta))
+
+tau_comparison <- sapply(fits, function(fit) scale_to_01(summary(fit, pars = "tau")$summary[, "mean"]))
+
+sens <- data.frame(
+  tau = as.vector(tau_comparison),
+  prior = factor(rep(c("Weak", "Moderate", "Strong"), each = nrow(tau_comparison)))
+)
+
+library(ggplot2)
+sens.recruit <- ggplot(sens, aes(x = tau, fill = prior)) +
+  geom_density(alpha = 0.5) + 
+  scale_fill_manual(values = c("green", "blue", "red"), labels = c("Weak", "Moderate", "Strong"))+
+  labs(title = "Recruitment Decisions", x = NULL, y = "Density", fill = "Prior parameters") +
+  theme_minimal()
+
+sens.recruit
+
+```
+
+# 2D plot
+```{r}
+output_df <- data.frame(
+  country = names(D),
+  fair = tau.fair$scaled,
+  recruit = tau.recruit$scaled
+)
+
+output_df <- left_join(output_df, country, by = c("country" = "code"))
+
+write.csv(output_df, "tabs/output.csv", row.names = FALSE)
+
+library(ggplot2)
+library(ggrepel)
+
+two_way <- ggplot(output_df, aes(x = fair, y = recruit, label = name)) +
+  geom_point() +
+  geom_text_repel(vjust = -0.5, hjust = -0.5, size=3) +
+  labs(x = "Norm Differentiation", y = "Perceptual Granularity", title = NULL) +
+  theme_bw()
+
+ggsave(file="figs/two_way.svg", plot=two_way, width=7, height=5)
+
+
+two_way
+
+```
+
+
+# EU map
+```{r}
+library(tidyverse)
+library(eurostat)
+library(leaflet)
+library(sf)
+library(scales)
+library(cowplot)
+library(ggthemes)
+library(giscoR)
+
+output_df <- read.csv("tabs/output.csv")
+
+SHP_0 <- get_eurostat_geospatial(resolution = 10, 
+                                 nuts_level = 0, 
+                                 year = 2016)
+
+SHP_0 <- left_join(SHP_0, output_df, by = c("id" = "country"))
+
+```
+
+```{r}
+
+library(ggplot2)
+library(gridExtra)
+
+coord_crop <- coord_sf(
+  xlim = c(-10, 35),
+  ylim = c(35, 65),
+  expand = FALSE
+)
+
+p1 <- SHP_0 %>%
+  ggplot(aes(fill = fair)) +
+  theme_void() +
+  geom_sf(size = 0.2, color = "#F3F3F3") +
+  coord_crop +
+  scale_fill_viridis_c(option = "plasma", name = "Norm Differentiation", alpha = 0.5)
+
+p2 <- SHP_0 %>%
+  ggplot(aes(fill = recruit)) +
+  theme_void() +
+  geom_sf(size = 0.2, color = "#F3F3F3") +
+  coord_crop +
+  scale_fill_viridis_c(option = "viridis", name = "Perceptual Granularity", alpha = 0.5)
+
+map <- gridExtra::grid.arrange(p1, p2, ncol = 2)
+
+ggsave("figs/map.svg", map, width = 10, height = 3.3)
+
+map
+
+```
+
+
+# Survey analysis
+```{r fig.width=8}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+recruit_labels1 <- c(
+  "recskil" = "Skills",
+  "recexp" = "Experience",
+  "recimg" = "Immigrant",
+  "recgndr" = "Gender",
+   "recknow" = "Network"
+)
+
+uni.recruit <- sort(uni.recruit)
+
+recruit_labels <- paste(round(uni.recruit, 2), "\n",recruit_labels1[names(uni.recruit)])
+names(recruit_labels) <- names(uni.recruit)
+
+recruit_legend <- c(
+  "1" = "No or little influence",
+  "2" = "Some influence", 
+  "3" = "Quite a lot of influence",
+  "4" = "A great deal of influence"
+)
+
+des.recruit <- df %>%
+  mutate(across(all_of(recruit), as.character)) %>%
+  pivot_longer(cols = all_of(recruit), names_to = "variable", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  count(name, variable, value, wt = pspwght, name = "w") %>%
+  group_by(name, variable) %>%
+  mutate(pct = w / sum(w)) %>%
+  mutate(variable = factor(variable, levels = names(recruit_labels))) %>%
+  ggplot(aes(x = name, y = pct, fill = value)) +
+  geom_col() +
+  facet_wrap(~ variable, ncol = 5, strip.position = "top", 
+             labeller = labeller(variable = recruit_labels)) + 
+  scale_y_continuous(labels = scales::percent) +
+  labs(fill = "Recruitment Influence") + 
+  scale_fill_manual(values = c("1" = "#e0f7fa", 
+                              "2" = "#00bfff", 
+                              "3" = "#1e90ff", 
+                              "4" = "#00008b"), 
+                    labels = recruit_legend) + 
+  theme_minimal() +
+  theme(axis.title.x = element_blank(), 
+        axis.title.y = element_blank(), 
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        strip.text = element_text(size = 10, face = "bold"), 
+        panel.spacing = unit(0.5, "lines")) + 
+  coord_flip()
+
+des.recruit
+
+ggsave(file="figs/recruit.svg", plot=des.recruit, width=8, height=5)
+
+```
+
+
+```{r fig.width=8}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+fair_labels1 <- c(
+  "sofrdst" = "Equality",
+  "sofrwrk" = "Equity",
+  "sofrpr" = "Need",
+  "sofrprv" = "Seniority"
+)
+
+uni.fair <- sort(uni.fair)
+
+fair_labels <- paste(round(uni.fair, 2), "\n",fair_labels1[names(uni.fair)])
+names(fair_labels) <- names(uni.fair)
+
+fair_legend <- c(
+  "1" = "Strongly agree",
+  "2" = "Agree", 
+  "3" = "Neutral",
+  "4" = "Disagree",
+  "5" = "Strongly disagree"
+)
+
+
+des.fair <- df %>%
+  mutate(across(all_of(fair), as.character)) %>%
+  pivot_longer(cols = all_of(fair), names_to = "variable", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  count(name, variable, value, wt = pspwght, name = "w") %>%
+  group_by(name, variable) %>%
+  mutate(pct = w / sum(w)) %>%
+  mutate(variable = factor(variable, levels = names(fair_labels))) %>%
+  ggplot(aes(x = name, y = pct, fill = value)) +
+  geom_col() +
+  facet_wrap(~ variable, ncol = 5, strip.position = "top", 
+             labeller = labeller(variable = fair_labels)) + 
+  scale_y_continuous(labels = scales::percent) +
+  labs(fill = "Social Fairness") +
+  scale_fill_manual(values = c("1" = "#28a745", 
+                              "2" = "#00d100", 
+                              "3" = "#f0f0f0", 
+                              "4" = "#ff5733", 
+                              "5" = "#ff1a1a"), 
+                    labels = fair_legend) +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(), 
+        axis.title.y = element_blank(), 
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        strip.text = element_text(size = 10, face = "bold"), 
+        panel.spacing = unit(0.5, "lines")) + 
+  coord_flip()
+
+des.fair
+
+ggsave(file="figs/fair.svg", plot=des.fair, width=8, height=5)
+
+```
+
+# Sensitivity
+
+
+```{r eval=FALSE, include=FALSE}
+library(patchwork)
+
+combined_plot <- sens.fair + sens.recruit + 
+  plot_layout(ncol = 2, guides = "collect") & 
+  theme(legend.position = "bottom")
+
+print(combined_plot)
+
+ggsave(file="figs/sens.svg", plot=combined_plot, width=8, height=5)
+
+```
+
+# External Validity
+
+```{r}
+library(readxl)
+external <- read_excel("external.xlsx")
+external[] <- lapply(external, function(col) if(is.numeric(col)) scale_to_01(col) else col)
+external <- left_join(external[,-1], output_df, by = c("code" = "country"))
+output_df <- read.csv("tabs/output.csv")
+library(ggplot2)
+library(ggrepel)
+
+ext <- ggplot(external, aes(x = recruit, y = combination , label = name)) +
+  geom_point() +
+  geom_text_repel(vjust = -0.5, hjust = -0.5, size=3) +
+  labs(x = "Perceptual Granularity", y = "CTL Combination Index", title = NULL) +
+  theme_bw()
+
+ext
+
+ggsave(file="figs/external.svg", plot=ext, width=7, height=5)
+
+```
+
