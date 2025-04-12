@@ -7,7 +7,8 @@ The repository includes the following files:
 - **Fairness_sensitivity - final.RMD**: Main R Markdown file for replication.
 - **ESS9_subset.csv**: Original and processed data file for analysis (which has been subsetted for chosen variables).
 - **country.csv**: List of countries in the study
-- **external.xlsx**: Cultural Tightness-Looseness Index for external validity checks 
+- **external.xlsx**: Cultural Tightness-Looseness Index for external validity checks
+- **HMDS.stan**: Hierarchical Multidimensional Scaling
 
 The country names in the dataset are shortened for data visualization. For replication, ensure all data and code are in the same folder.
 
